@@ -90,4 +90,4 @@ def send_data_to_power_automate(studentid, courseid):
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)git 
+    app.run(host='0.0.0.0', port=port)
