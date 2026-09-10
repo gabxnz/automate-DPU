@@ -3,6 +3,10 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - '**.md'         # Ignores alterações em arquivos Markdown (ex: README.md)
+      - '.gitignore'    # Ignores alterações no .gitignore
+      - '.env.example'  # Ignores exemplos de variáveis
 
 jobs:
   deploy:
