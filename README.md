@@ -88,8 +88,6 @@ O servidor estará acessível em `http://localhost:8080`.
 
 O serviço roda em nuvem através da CLI do Fly.io (`flyctl`).
 
-### Comandos Essenciais para o Dia a Dia
-
 * **Autenticar no Fly.io:**
   ```cmd
   flyctl auth login
