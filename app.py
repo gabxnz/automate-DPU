@@ -2,11 +2,15 @@ from flask import Flask, request, jsonify
 import config
 import requests as r
 from get_data import get_user_data, get_course_data, format_data
-from events import user_enrolment_updated, user_enrolment_created
+from events import user_enrolment_created
 import os
 
 app = Flask(__name__)
 app.config['DEBUG'] = config.DEBUG
+
+@app.route('/', methods=['GET'])
+def home():
+    return "<h1>🚀 Servidor de Automação Moodle-DPU rodando localmente!</h1>"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -16,19 +20,18 @@ def webhook():
             return jsonify({'status': 'error', 'message': 'Unsupported Content-Type'}), 400
 
         data = request.get_json()
-        eventname = data.get('eventname')
+        eventname = str(data.get('eventname', ''))
 
-        if eventname == '\\core\\event\\user_enrolment_updated':
-            studentid = user_enrolment_updated(data)
-            if studentid:
-                print("Enviando dados para o Power Automate (Inscrição Atualizada)...")
-                send_data_to_power_automate(studentid, data.get('courseid'))
-
-        elif eventname == '\\core\\event\\user_enrolment_created':
+        # Processa estritamente o evento de criacao de inscricao
+        if eventname.endswith('user_enrolment_created'):
             userid = user_enrolment_created(data)
             if userid:
-                print("Enviando dados para o Power Automate (Nova Inscrição)...")
+                print(f"Processando nova inscrição para o usuário {userid}...")
                 send_data_to_power_automate(userid, data.get('courseid'))
+            else:
+                print("Evento de inscrição ignorado devido aos filtros em events.py.")
+        else:
+            print(f"Evento ignorado para evitar duplicidade: {eventname}")
 
         return jsonify({'status': 'success'}), 200
 
