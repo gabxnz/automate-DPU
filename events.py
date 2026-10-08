@@ -11,7 +11,17 @@ def user_enrolment_created(data):
             except Exception:
                 other = {}
 
-        enrol_type = other.get('enrol') if isinstance(other, dict) else None
+        if not isinstance(other, dict):
+            other = {}
+
+        enrol_type = other.get('enrol')
+        status = other.get('status')
+
+        # 🛑 FILTRO DE STATUS: 0 = Ativo | 1 = Pendente / Aguardando Aprovação
+        # Se o status for diferente de 0, significa que é apenas uma solicitação pendente.
+        if status is not None and int(status) != 0:
+            print(f"Solicitação ignorada por estar pendente (Status: {status})")
+            return None
 
         if enrol_type in ['manual', 'self', 'apply']:
             return studentid
