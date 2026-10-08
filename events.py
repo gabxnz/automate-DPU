@@ -17,18 +17,20 @@ def user_enrolment_created(data):
         enrol_type = other.get('enrol')
         status = other.get('status', data.get('status'))
 
-        print(f"🔍 DEBUG CREATED: enrol={enrol_type} | status={status}")
+        print(f"🔍 EVENTO CREATED: enrol={enrol_type} | status={status} | user={studentid}")
 
-        # 1. TRAVA DE STATUS: Se status for informado e diferente de 0 (0 = Ativo/Aceito | 1 = Pendente)
+        # 1. TRAVA DE STATUS: Se o status for informado e diferente de 0 (0 = Ativo)
         if status is not None and int(status) != 0:
-            print(f"⚠️ Solicitação ignorada por estar pendente/suspensa (Status: {status})")
+            print(f"⚠️ Inscrição criada com status pendente/suspenso ({status}). Ignorado.")
             return None
 
-        # 2. TIPOS PERMITIDOS: Permite manual, auto-inscrição e solicitações aprovadas
-        if enrol_type in ['manual', 'self', 'apply']:
+        # 2. APENAS INSCRIÇÕES DIRETAS ('manual' e 'self')
+        # 'apply' foi removido pois na criação ele é sempre uma solicitação pendente.
+        if enrol_type in ['manual', 'self']:
+            print(f"✅ Inscrição direta permitida ({enrol_type}) para usuário {studentid}")
             return studentid
         else:
-            print(f"ℹ️ Tipo de inscrição ignorado: {enrol_type}")
+            print(f"ℹ️ Solicitação de inscrição ignorada na criação (tipo: {enrol_type})")
             return None
 
     except Exception as e:
@@ -56,15 +58,17 @@ def user_enrolment_updated(data):
 
         status = other.get('status', data.get('status'))
 
-        print(f"🔍 DEBUG UPDATED: status={status}")
+        print(f"🔍 EVENTO UPDATED: status={status} | user={studentid} | course={courseid}")
 
-        # Trava também na atualização: Só envia se o status for 0 (Ativo/Aprovado)
+        # Bloqueia apenas se o status for explicitamente diferente de 0
         if status is not None and int(status) != 0:
             print(f"⚠️ Atualização ignorada pois status não é ativo (Status: {status})")
             return None
 
+        print(f"✅ Aprovação/Atualização válida enviada para o Excel (Usuário {studentid})")
         return studentid
 
     except Exception as e:
         print(f"Erro em user_enrolment_updated: {str(e)}")
         return None
+    
