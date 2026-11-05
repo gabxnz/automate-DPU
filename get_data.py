@@ -70,10 +70,47 @@ def get_course_data(courseid):
 
 def format_data(user_data):
     if not user_data or not isinstance(user_data, dict):
-        return {"username": "", "firstname": "", "lastname": "", "email": ""}
-    return {
+        return {
+            "nome": "", "firstname": "", "lastname": "", "username": "",
+            "cpf": "", "email": "", "cidade": "", "uf": "", "regiao": "",
+            "raca": "", "genero": "", "cargo": "", "perfil": ""
+        }
+
+    firstname = user_data.get("firstname", "").strip()
+    lastname = user_data.get("lastname", "").strip()
+    fullname = f"{firstname} {lastname}".strip()
+
+    custom_fields = {}
+    if "customfields" in user_data and isinstance(user_data["customfields"], list):
+        for field in user_data["customfields"]:
+            shortname = field.get("shortname")
+            value = field.get("value", "")
+            if shortname:
+                custom_fields[shortname] = value
+
+    raw_username = str(user_data.get("username", "") or custom_fields.get("cpf", "")).strip()
+    clean_cpf = "".join(filter(str.isdigit, raw_username)).zfill(11)
+    
+    if len(clean_cpf) == 11:
+        formatted_cpf = f"{clean_cpf[:3]}.{clean_cpf[3:6]}.{clean_cpf[6:9]}-{clean_cpf[9:]}"
+    else:
+        formatted_cpf = raw_username
+
+    payload = {
+        "nome": fullname,
+        "firstname": firstname,
+        "lastname": lastname,
         "username": user_data.get("username", ""),
-        "firstname": user_data.get("firstname", ""),
-        "lastname": user_data.get("lastname", ""),
-        "email": user_data.get("email", "")
+        "cpf": formatted_cpf,
+        "email": user_data.get("email", ""),
+        "cidade": user_data.get("city", "") or custom_fields.get("cidade", "") or custom_fields.get("city", ""),
+        "uf": custom_fields.get("uf", "") or custom_fields.get("estado", ""),
+        "regiao": custom_fields.get("regiao", ""),
+        "raca": custom_fields.get("raca", "") or custom_fields.get("racacor", ""),
+        "genero": custom_fields.get("genero", "") or custom_fields.get("sexo", ""),
+        "cargo": custom_fields.get("cargo", "") or custom_fields.get("perfil", ""),
+        "perfil": custom_fields.get("perfil", "") or custom_fields.get("cargo", "")
     }
+
+    payload.update(custom_fields)
+    return payload
