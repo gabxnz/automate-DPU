@@ -17,25 +17,6 @@ def cleanup_old_creations():
     for key in to_delete:
         del recent_creations[key]
 
-def is_pending_request(data):
-    """ Verifica se o payload recebido indica solicitação pendente de aprovação (status 1) """
-    if not isinstance(data, dict):
-        return False
-        
-    other = data.get('other', {})
-    if isinstance(other, dict):
-        userenrolment = other.get('userenrolment', {})
-        if isinstance(userenrolment, dict):
-            if str(userenrolment.get('status', '')) == '1':
-                return True
-        if str(other.get('status', '')) == '1':
-            return True
-            
-    if str(data.get('status', '')) == '1':
-        return True
-        
-    return False
-
 @app.route('/', methods=['GET'])
 def home():
     return "<h1>🚀 Servidor de Automação Moodle-DPU rodando!</h1>"
@@ -59,47 +40,43 @@ def webhook():
 
         cleanup_old_creations()
 
-        # 1. Se o payload indicar solicitação pendente (status 1), descarta
-        if is_pending_request(data):
-            print("--> Evento ignorado: Solicitação de inscrição pendente de aprovação.", flush=True)
-            return jsonify({'status': 'ignored', 'reason': 'Solicitacao pendente'}), 200
+        if eventname.endswith('user_enrolment_deleted'):
+            print("--> [IGNORADO] Exclusão de inscrição detectada. Nenhuma ação enviada para a planilha.", flush=True)
+            return jsonify({'status': 'ignored', 'reason': 'Exclusao de inscricao'}), 200
 
-        # 2. NOVA INSCRIÇÃO
-        if eventname.endswith('user_enrolment_created'):
+        elif eventname.endswith('user_enrolment_created'):
+            other = data.get('other', {})
+            enrol_type = str(other.get('enrol', '')) if isinstance(other, dict) else ''
+
+            if enrol_type == 'apply':
+                print("--> [IGNORADO] Solicitação de curso recebida ('apply'). Aguardando aprovação...", flush=True)
+                return jsonify({'status': 'ignored', 'reason': 'Solicitacao pendente'}), 200
+
             userid = user_enrolment_created(data)
-            if userid:
+            if userid and courseid:
                 userid_str = str(userid)
-                
-                # Valida se a inscrição já está ativa no Moodle
-                if not is_user_enrolment_active(userid_str, courseid):
-                    print(f"--> Inscrição criada para {userid_str} no curso {courseid}, mas ainda pendente de aprovação. Ignorado.", flush=True)
-                    return jsonify({'status': 'ignored', 'reason': 'Inscricao pendente'}), 200
+                if is_user_enrolment_active(userid_str, courseid):
+                    recent_creations[(userid_str, courseid)] = now
+                    print(f"--> [APROVADO] Nova inscrição direta ativa para usuário {userid_str} no curso {courseid}.", flush=True)
+                    send_data_to_power_automate(userid_str, courseid)
 
-                recent_creations[(userid_str, courseid)] = now
-                print(f"--> Nova inscrição ativa detectada para usuário {userid_str} no curso {courseid}.", flush=True)
-                send_data_to_power_automate(userid_str, courseid)
-            else:
-                print("--> Evento 'created' recebido, mas nenhum userid foi extraído.", flush=True)
-
-        # 3. ATUALIZAÇÃO / APROVAÇÃO DE INSCRIÇÃO
         elif eventname.endswith('user_enrolment_updated'):
             studentid = user_enrolment_updated(data)
-            if studentid:
+            if studentid and courseid:
                 studentid_str = str(studentid)
+
                 creation_time = recent_creations.get((studentid_str, courseid))
+                if creation_time and (now - creation_time < 10):
+                    print(f"--> [IGNORADO] Evento duplicado recente para usuário {studentid_str} no curso {courseid}.", flush=True)
+                    return jsonify({'status': 'ignored', 'reason': 'Evento duplicado'}), 200
 
-                if creation_time and (now - creation_time < 30):
-                    print(f"--> Evento 'updated' simultâneo ignorado para o usuário {studentid_str}.", flush=True)
-                else:
-                    # Confirma que a atualização tornou a inscrição ativa (aprovação)
-                    if not is_user_enrolment_active(studentid_str, courseid):
-                        print(f"--> Atualização recebida para {studentid_str}, mas o status da inscrição ainda não é ativo. Ignorado.", flush=True)
-                        return jsonify({'status': 'ignored', 'reason': 'Inscricao nao ativa'}), 200
-
-                    print(f"--> Aprovação/Atualização legítima detectada para o usuário {studentid_str}.", flush=True)
+                if is_user_enrolment_active(studentid_str, courseid):
+                    recent_creations[(studentid_str, courseid)] = now
+                    print(f"--> [APROVADO] Aprovação ou edição de inscrição confirmada para usuário {studentid_str} no curso {courseid}.", flush=True)
                     send_data_to_power_automate(studentid_str, courseid)
-            else:
-                print("--> Evento 'updated' recebido, mas nenhum studentid foi extraído por events.py.", flush=True)
+                else:
+                    print(f"--> [IGNORADO] Atualização recebida, mas usuário {studentid_str} ainda não está ativo.", flush=True)
+                    return jsonify({'status': 'ignored', 'reason': 'Inscricao nao ativa'}), 200
         else:
             print(f"--> Evento não tratado: {eventname}", flush=True)
 
