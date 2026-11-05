@@ -25,6 +25,11 @@ def home():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
+    data = request.get_json()
+    print("========================================", flush=True)
+    print(f">>> RECEBIDO DO MOODLE: {data}", flush=True)
+    print("========================================", flush=True)
+
     try:
         content_type = request.headers.get('Content-Type')
         if content_type != 'application/json':
