@@ -51,6 +51,40 @@ def get_endpoint():
         return f"{base_url}/webservice/rest/server.php"
     return base_url
 
+def is_user_enrolment_active(userid, courseid):
+    """ Consulta o Moodle com onlyactive=1 para garantir que a inscrição está APROVADA/ATIVA """
+    if not userid or not courseid:
+        return True
+
+    endpoint = get_endpoint()
+    params = {
+        "wstoken": config.MOODLE_API_TOKEN,
+        "wsfunction": "core_enrol_get_enrolled_users",
+        "moodlewsrestformat": "json",
+        "courseid": courseid,
+        "options[0][name]": "userids",
+        "options[0][value]": userid,
+        "options[1][name]": "onlyactive",
+        "options[1][value]": 1
+    }
+    
+    try:
+        response = requests.get(endpoint, params=params, timeout=config.TIMEOUT)
+        if not response.text.strip().startswith(('{', '[')):
+            print(f"!!! ERRO MOODLE (VERIFICAR ATIVO): Resposta nao e JSON", flush=True)
+            return True
+            
+        data = response.json()
+
+        if isinstance(data, list):
+            # Se for retornado vazio [], significa que o usuário é pendente ou não ativo
+            return len(data) > 0
+
+        return True
+    except Exception as e:
+        print(f"!!! Erro ao verificar status ativo da inscrição no Moodle: {str(e)}", flush=True)
+        return True
+
 def get_user_data(userid):
     endpoint = get_endpoint()
     params = {
@@ -205,7 +239,6 @@ def format_data(user_data):
 
     payload.update(custom_fields)
     
-    # Sobrescreve para garantir todos os campos mapeados com as siglas certas
     payload["cpf"] = formatted_cpf
     payload["username"] = formatted_cpf
     payload["uf"] = uf_final

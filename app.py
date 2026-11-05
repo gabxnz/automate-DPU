@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import config
 import requests as r
-from get_data import get_user_data, get_course_data, format_data
+from get_data import get_user_data, get_course_data, format_data, is_user_enrolment_active
 from events import user_enrolment_updated, user_enrolment_created
 import os
 import time
@@ -16,6 +16,25 @@ def cleanup_old_creations():
     to_delete = [key for key, timestamp in recent_creations.items() if now - timestamp > 60]
     for key in to_delete:
         del recent_creations[key]
+
+def is_pending_request(data):
+    """ Verifica se o payload recebido indica solicitação pendente de aprovação (status 1) """
+    if not isinstance(data, dict):
+        return False
+        
+    other = data.get('other', {})
+    if isinstance(other, dict):
+        userenrolment = other.get('userenrolment', {})
+        if isinstance(userenrolment, dict):
+            if str(userenrolment.get('status', '')) == '1':
+                return True
+        if str(other.get('status', '')) == '1':
+            return True
+            
+    if str(data.get('status', '')) == '1':
+        return True
+        
+    return False
 
 @app.route('/', methods=['GET'])
 def home():
@@ -40,16 +59,29 @@ def webhook():
 
         cleanup_old_creations()
 
+        # 1. Se o payload indicar solicitação pendente (status 1), descarta
+        if is_pending_request(data):
+            print("--> Evento ignorado: Solicitação de inscrição pendente de aprovação.", flush=True)
+            return jsonify({'status': 'ignored', 'reason': 'Solicitacao pendente'}), 200
+
+        # 2. NOVA INSCRIÇÃO
         if eventname.endswith('user_enrolment_created'):
             userid = user_enrolment_created(data)
             if userid:
                 userid_str = str(userid)
+                
+                # Valida se a inscrição já está ativa no Moodle
+                if not is_user_enrolment_active(userid_str, courseid):
+                    print(f"--> Inscrição criada para {userid_str} no curso {courseid}, mas ainda pendente de aprovação. Ignorado.", flush=True)
+                    return jsonify({'status': 'ignored', 'reason': 'Inscricao pendente'}), 200
+
                 recent_creations[(userid_str, courseid)] = now
-                print(f"--> Nova inscrição detectada para usuário {userid_str} no curso {courseid}.", flush=True)
+                print(f"--> Nova inscrição ativa detectada para usuário {userid_str} no curso {courseid}.", flush=True)
                 send_data_to_power_automate(userid_str, courseid)
             else:
                 print("--> Evento 'created' recebido, mas nenhum userid foi extraído.", flush=True)
 
+        # 3. ATUALIZAÇÃO / APROVAÇÃO DE INSCRIÇÃO
         elif eventname.endswith('user_enrolment_updated'):
             studentid = user_enrolment_updated(data)
             if studentid:
@@ -59,7 +91,12 @@ def webhook():
                 if creation_time and (now - creation_time < 30):
                     print(f"--> Evento 'updated' simultâneo ignorado para o usuário {studentid_str}.", flush=True)
                 else:
-                    print(f"--> Atualização legítima detectada para o usuário {studentid_str}.", flush=True)
+                    # Confirma que a atualização tornou a inscrição ativa (aprovação)
+                    if not is_user_enrolment_active(studentid_str, courseid):
+                        print(f"--> Atualização recebida para {studentid_str}, mas o status da inscrição ainda não é ativo. Ignorado.", flush=True)
+                        return jsonify({'status': 'ignored', 'reason': 'Inscricao nao ativa'}), 200
+
+                    print(f"--> Aprovação/Atualização legítima detectada para o usuário {studentid_str}.", flush=True)
                     send_data_to_power_automate(studentid_str, courseid)
             else:
                 print("--> Evento 'updated' recebido, mas nenhum studentid foi extraído por events.py.", flush=True)
