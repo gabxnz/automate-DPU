@@ -9,11 +9,9 @@ import time
 app = Flask(__name__)
 app.config['DEBUG'] = config.DEBUG
 
-# Dicionário em memória para rastrear inscrições recentes: {(userid, courseid): timestamp}
 recent_creations = {}
 
 def cleanup_old_creations():
-    """ Limpa registros de criação com mais de 60 segundos para liberar memória """
     now = time.time()
     to_delete = [key for key, timestamp in recent_creations.items() if now - timestamp > 60]
     for key in to_delete:
@@ -25,7 +23,7 @@ def home():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    data = request.get_json()
+    data = request.get_json() or {}
     print("========================================", flush=True)
     print(f">>> RECEBIDO DO MOODLE: {data}", flush=True)
     print("========================================", flush=True)
@@ -33,52 +31,57 @@ def webhook():
     try:
         content_type = request.headers.get('Content-Type')
         if content_type != 'application/json':
+            print("--> Erro: Content-Type invalido", flush=True)
             return jsonify({'status': 'error', 'message': 'Unsupported Content-Type'}), 400
 
-        data = request.get_json()
         eventname = str(data.get('eventname', ''))
-        courseid = data.get('courseid')
+        courseid = str(data.get('courseid')) if data.get('courseid') else None
         now = time.time()
 
         cleanup_old_creations()
 
-        # 1. NOVA INSCRIÇÃO
         if eventname.endswith('user_enrolment_created'):
             userid = user_enrolment_created(data)
             if userid:
-                # Marca o momento exato em que a inscrição foi criada
-                recent_creations[(userid, courseid)] = now
-                print(f"Nova inscrição detectada para usuário {userid} no curso {courseid}.")
-                send_data_to_power_automate(userid, courseid)
+                userid_str = str(userid)
+                recent_creations[(userid_str, courseid)] = now
+                print(f"--> Nova inscrição detectada para usuário {userid_str} no curso {courseid}.", flush=True)
+                send_data_to_power_automate(userid_str, courseid)
+            else:
+                print("--> Evento 'created' recebido, mas nenhum userid foi extraído.", flush=True)
 
-        # 2. ATUALIZAÇÃO DE INSCRIÇÃO / PERFIL
         elif eventname.endswith('user_enrolment_updated'):
             studentid = user_enrolment_updated(data)
             if studentid:
-                creation_time = recent_creations.get((studentid, courseid))
+                studentid_str = str(studentid)
+                creation_time = recent_creations.get((studentid_str, courseid))
 
-                # Se foi criado há menos de 30 segundos, é o disparo duplo inicial do Moodle -> IGNOURA
                 if creation_time and (now - creation_time < 30):
-                    print(f"Evento 'updated' simultâneo ignorado para o usuário {studentid}.")
+                    print(f"--> Evento 'updated' simultâneo ignorado para o usuário {studentid_str}.", flush=True)
                 else:
-                    print(f"Atualização legítima detectada para o usuário {studentid}.")
-                    send_data_to_power_automate(studentid, courseid)
+                    print(f"--> Atualização legítima detectada para o usuário {studentid_str}.", flush=True)
+                    send_data_to_power_automate(studentid_str, courseid)
+            else:
+                print("--> Evento 'updated' recebido, mas nenhum studentid foi extraído por events.py.", flush=True)
+        else:
+            print(f"--> Evento não tratado: {eventname}", flush=True)
 
         return jsonify({'status': 'success'}), 200
 
     except Exception as e:
-        print(f"Erro ao processar webhook: {str(e)}")
+        print(f"!!! Erro ao processar webhook: {str(e)}", flush=True)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 def send_data_to_power_automate(studentid, courseid):
     try:
+        print(f"--> Buscando dados no Moodle para o usuário {studentid} e curso {courseid}...", flush=True)
         user_data = get_user_data(studentid)
         course_name = get_course_data(courseid)
 
         formatted_data = format_data(user_data)
         formatted_data['course_fullname'] = course_name
 
-        print(f"Enviando dados para Power Automate: {formatted_data['username']} - {course_name}")
+        print(f"--> Enviando para Power Automate: {formatted_data.get('username', studentid)} - {course_name}", flush=True)
 
         url = config.POWER_AUTOMATE_URL
         headers = {"Content-Type": "application/json"}
@@ -86,12 +89,12 @@ def send_data_to_power_automate(studentid, courseid):
         response = r.post(str(url), headers=headers, json=formatted_data, timeout=config.TIMEOUT)
 
         if response.status_code in [200, 202]:
-            print("Dados enviados com sucesso para o Power Automate.")
+            print("--> Dados enviados COM SUCESSO para o Power Automate!", flush=True)
         else:
-            print(f"Erro no Power Automate: {response.status_code} - {response.text}")
+            print(f"!!! Erro no Power Automate. Status: {response.status_code} | Resposta: {response.text}", flush=True)
 
     except Exception as e:
-        print(f"Erro ao enviar dados para o Power Automate: {str(e)}")
+        print(f"!!! Erro na função send_data_to_power_automate: {str(e)}", flush=True)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
